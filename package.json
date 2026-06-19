@@ -1,0 +1,26 @@
+{
+  "name": "boomsweep",
+  "version": "1.0.0",
+  "description": "Boomsweep — a clean, modern Minesweeper for iOS and Android.",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "add:ios": "cap add ios",
+    "add:android": "cap add android",
+    "assets": "capacitor-assets generate --iconBackgroundColor '#6d5efc' --iconBackgroundColorDark '#11151f' --splashBackgroundColor '#eef0ff' --splashBackgroundColorDark '#11151f'"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/ios": "^6.1.2",
+    "@capacitor/status-bar": "^6.0.1",
+    "@capacitor/splash-screen": "^6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/assets": "^3.0.5"
+  }
+}

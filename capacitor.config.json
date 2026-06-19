@@ -1,0 +1,18 @@
+{
+  "appId": "com.saifassociates.boomsweep",
+  "appName": "Boomsweep",
+  "webDir": "www",
+  "backgroundColor": "#eef0ff",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#eef0ff",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": {
+      "style": "DEFAULT",
+      "backgroundColor": "#eef0ff"
+    }
+  }
+}
