@@ -47,12 +47,14 @@ jobs:
         run: |
           AAB=$(find android/app/build/outputs/bundle/release -name "*.aab" | head -1)
           echo "Signing $AAB"
+          STOREPASS=$(printf '%s' "${{ secrets.KEYSTORE_PASSWORD }}" | tr -d '\r\n')
+          ALIAS=$(printf '%s' "${{ secrets.KEY_ALIAS }}" | tr -d '\r\n')
           jarsigner -verbose \
             -keystore upload.jks \
-            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -storepass "$STOREPASS" \
+            -keypass "$STOREPASS" \
             -sigalg SHA256withRSA -digestalg SHA-256 \
-            "$AAB" "${{ secrets.KEY_ALIAS }}"
+            "$AAB" "$ALIAS"
           cp "$AAB" boomsweep-release.aab
 
       - name: Upload .aab artifact
