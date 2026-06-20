@@ -30,6 +30,12 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Target API level 35 (Google Play requirement)
+        run: |
+          sed -i -E 's/(compileSdkVersion = )[0-9]+/\135/; s/(targetSdkVersion = )[0-9]+/\135/' android/variables.gradle
+          echo "----- android/variables.gradle -----"
+          cat android/variables.gradle
+
       - name: Generate app icon and splash
         run: npx capacitor-assets generate --iconBackgroundColor '#6d5efc' --iconBackgroundColorDark '#11151f' --splashBackgroundColor '#eef0ff' --splashBackgroundColorDark '#11151f'
 
