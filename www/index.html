@@ -100,11 +100,14 @@
     transition:transform .1s ease, background .15s ease; }
   .reset:active { transform:scale(.92); }
 
-  .board-shell { display:flex; justify-content:center; overflow:auto; max-width:100%; }
-  .board { display:grid; gap:4px; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
-  .cell { width:34px; height:34px; border-radius:8px; border:none; background:var(--covered);
+  .board-shell { display:flex; justify-content:center; overflow:auto; max-width:100%; max-height:64vh;
+    -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  .board { display:grid; gap:4px; touch-action:pan-x pan-y; user-select:none; -webkit-user-select:none;
+    --cell:34px; --cellfont:16px; --z:1; margin:auto; }
+  .cell { width:calc(var(--cell) * var(--z)); height:calc(var(--cell) * var(--z));
+    border-radius:calc(8px * var(--z)); border:none; background:var(--covered);
     background-image:linear-gradient(160deg,var(--covered-hi),var(--covered)); cursor:pointer; font-weight:800;
-    font-size:16px; display:flex; align-items:center; justify-content:center;
+    font-size:calc(var(--cellfont) * var(--z)); display:flex; align-items:center; justify-content:center;
     transition:transform .07s ease, background .12s ease, box-shadow .12s ease;
     box-shadow:inset 0 -2px 0 rgba(40,55,90,.06); color:var(--ink); }
   .cell:active:not(.open){ transform:scale(.94); }
@@ -116,6 +119,16 @@
   .cell.bad-flag { background:#fff0d6; background-image:none; }
   .c1{color:var(--n1)} .c2{color:var(--n2)} .c3{color:var(--n3)} .c4{color:var(--n4)}
   .c5{color:var(--n5)} .c6{color:var(--n6)} .c7{color:var(--n7)} .c8{color:var(--n8)}
+
+  /* Zoom controls */
+  .zoombar { display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; }
+  .zoombar button { border:1px solid var(--line); background:var(--bg); color:var(--ink); font:inherit; font-weight:800;
+    font-size:18px; line-height:1; width:40px; height:36px; border-radius:10px; cursor:pointer; transition:all .12s ease; }
+  .zoombar button:hover { background:var(--accent-soft); }
+  .zoombar button:active { transform:scale(.92); }
+  .zoombar .fit { width:auto; padding:0 12px; font-size:13px; font-weight:700; }
+  .zoombar .zlabel { min-width:52px; text-align:center; font-size:13px; font-weight:700; color:var(--muted);
+    font-variant-numeric:tabular-nums; }
 
   .status { text-align:center; font-size:14px; color:var(--muted); font-weight:600; min-height:20px; }
   .status.win { color:var(--n2); } .status.lose { color:var(--flag); }
@@ -153,7 +166,7 @@
     transition:opacity .25s ease, transform .25s ease; z-index:50; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
-  @media (max-width:520px){ .cell{ width:30px; height:30px; font-size:15px; } }
+  @media (max-width:520px){ .board{ --cell:30px; --cellfont:15px; } }
 </style>
 </head>
 <body>
@@ -193,10 +206,16 @@
         <div class="stat"><span>⏱️</span><span id="timer">0</span></div>
       </div>
       <div class="board-shell"><div class="board" id="board"></div></div>
+      <div class="zoombar">
+        <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+        <span class="zlabel" id="zoomLabel">100%</span>
+        <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+        <button class="fit" id="zoomReset" title="Fit board">Fit</button>
+      </div>
     </div>
     <div class="status" id="status">Tap any tile to start</div>
     <div class="best" id="best"></div>
-    <div class="hint">Tap to reveal • Long-press (or right-click) to flag • Your first tap is always safe</div>
+    <div class="hint">Tap to reveal • Long-press (or right-click) to flag • Pinch or use −/+ to zoom, then drag to pan • Your first tap is always safe</div>
   </section>
 
   <!-- STATS -->
@@ -298,6 +317,15 @@ const SFX={
   lose:()=>seq([{f:330,t:'sawtooth'},{f:247,t:'sawtooth'},{f:165,d:0.3,t:'sawtooth'}]),
 };
 
+/* ============ Zoom ============ */
+let zoom = 1;
+const ZMIN = 0.5, ZMAX = 2.6;
+function clampZoom(z){ return Math.max(ZMIN, Math.min(ZMAX, z)); }
+function applyZoom(){
+  boardEl.style.setProperty('--z', zoom.toFixed(3));
+  $('zoomLabel').textContent = Math.round(zoom*100) + '%';
+}
+
 /* ============ Game ============ */
 function init(){
   const cfg=LEVELS[diff]; rows=cfg.rows; cols=cfg.cols; mines=cfg.mines;
@@ -305,7 +333,7 @@ function init(){
   started=false; dead=false; won=false; flagsPlaced=0; revealedCount=0; usedFlag=false; badFlag=false;
   stopTimer(); timer=0; timerEl.textContent='0'; resetEl.textContent='🙂';
   statusEl.textContent='Tap any tile to start'; statusEl.className='status';
-  updateMineCount(); renderBoard(); renderBest();
+  updateMineCount(); renderBoard(); renderBest(); applyZoom();
 }
 function renderBoard(){
   boardEl.style.gridTemplateColumns=`repeat(${cols}, 1fr)`; boardEl.innerHTML='';
@@ -439,12 +467,28 @@ function showToast(msg){ toastEl.textContent=msg; toastEl.classList.add('show');
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
 /* ============ Events ============ */
-boardEl.addEventListener('click',e=>{ const el=e.target.closest('.cell'); if(el) onLeft(+el.dataset.r,+el.dataset.c); });
+boardEl.addEventListener('click',e=>{ if(pinching) return; const el=e.target.closest('.cell'); if(el) onLeft(+el.dataset.r,+el.dataset.c); });
 boardEl.addEventListener('contextmenu',e=>{ const el=e.target.closest('.cell'); if(!el)return; e.preventDefault(); onRight(+el.dataset.r,+el.dataset.c); });
 let pressTimer=null,longPressed=false;
-boardEl.addEventListener('touchstart',e=>{ const el=e.target.closest('.cell'); if(!el)return; longPressed=false;
+boardEl.addEventListener('touchstart',e=>{ if(e.touches.length>1){ if(pressTimer)clearTimeout(pressTimer); return; }
+  const el=e.target.closest('.cell'); if(!el)return; longPressed=false;
   pressTimer=setTimeout(()=>{ longPressed=true; onRight(+el.dataset.r,+el.dataset.c); },380); },{passive:true});
+boardEl.addEventListener('touchmove',e=>{ if(pressTimer)clearTimeout(pressTimer); },{passive:true});
 boardEl.addEventListener('touchend',e=>{ if(pressTimer)clearTimeout(pressTimer); if(longPressed)e.preventDefault(); },{passive:false});
+
+/* ---- pinch-to-zoom on the board area ---- */
+const shellEl = document.querySelector('.board-shell');
+let pinching=false, pinchStartDist=0, pinchStartZoom=1;
+function touchDist(t){ const dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY; return Math.hypot(dx,dy); }
+shellEl.addEventListener('touchstart',e=>{ if(e.touches.length===2){ pinching=true; pinchStartDist=touchDist(e.touches)||1; pinchStartZoom=zoom; } },{passive:true});
+shellEl.addEventListener('touchmove',e=>{ if(e.touches.length===2){ e.preventDefault(); const d=touchDist(e.touches);
+  zoom=clampZoom(pinchStartZoom*(d/pinchStartDist)); applyZoom(); } },{passive:false});
+shellEl.addEventListener('touchend',e=>{ if(e.touches.length<2){ if(pinching) setTimeout(()=>{ pinching=false; },60); } },{passive:true});
+
+/* zoom buttons */
+$('zoomIn').addEventListener('click',()=>{ zoom=clampZoom(zoom+0.2); applyZoom(); });
+$('zoomOut').addEventListener('click',()=>{ zoom=clampZoom(zoom-0.2); applyZoom(); });
+$('zoomReset').addEventListener('click',()=>{ zoom=1; applyZoom(); });
 
 resetEl.addEventListener('click',init);
 diffEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
