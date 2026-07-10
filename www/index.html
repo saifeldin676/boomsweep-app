@@ -166,7 +166,29 @@
     transition:opacity .25s ease, transform .25s ease; z-index:50; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
-  @media (max-width:520px){ .board{ --cell:30px; --cellfont:15px; } }
+  /* Replay */
+  .replay-item { width:100%; display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:12px 14px; box-shadow:var(--shadow); }
+  .replay-item .ri-main { flex:1; min-width:0; }
+  .ri-title { font-weight:800; font-size:14px; }
+  .ri-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+  .ri-play { border:none; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font:inherit;
+    font-weight:700; font-size:13px; padding:8px 14px; border-radius:11px; cursor:pointer; flex:0 0 auto; }
+  .ri-play:active { transform:scale(.94); }
+  #replayPlayer { display:none; width:100%; flex-direction:column; align-items:center; gap:12px; }
+  #replayPlayer.show { display:flex; }
+  .replay-board { --cell:26px; --cellfont:13px; }
+  .rp-meta { display:flex; gap:16px; font-size:14px; color:var(--muted); font-weight:700; font-variant-numeric:tabular-nums; }
+  .rp-meta b { color:var(--ink); }
+  .rp-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:center; width:100%; max-width:460px; }
+  .rp-controls button { border:1px solid var(--line); background:var(--bg); color:var(--ink); font:inherit; font-weight:800;
+    font-size:16px; width:46px; height:40px; border-radius:11px; cursor:pointer; transition:all .12s ease; }
+  .rp-controls button:hover { background:var(--accent-soft); }
+  .rp-controls button:active { transform:scale(.92); }
+  .rp-controls .rp-scrub { flex:1; min-width:110px; accent-color:var(--accent); height:6px; }
+  .rp-controls .rp-close { width:auto; padding:0 12px; border:none; background:transparent; color:var(--flag); font-weight:700; font-size:13px; }
+
+  @media (max-width:520px){ .board{ --cell:30px; --cellfont:15px; } .replay-board{ --cell:23px; --cellfont:12px; } }
 </style>
 </head>
 <body>
@@ -180,6 +202,7 @@
     <button data-view="play" class="active">Play</button>
     <button data-view="stats">Stats</button>
     <button data-view="awards">Awards</button>
+    <button data-view="replay">Replays</button>
   </div>
 
   <!-- PLAY -->
@@ -191,7 +214,8 @@
         <button data-diff="expert">Expert</button>
         <button data-diff="custom">Custom</button>
       </div>
-      <button class="sound-btn" id="soundBtn" title="Toggle sound">🔊 Sound</button>
+      <button class="sound-btn" id="restartBtn" title="Restart this game">↻ Restart</button>
+      <button class="sound-btn" id="soundBtn" title="Toggle sound effects">🔊 Sound</button>
     </div>
     <div class="custom-panel" id="customPanel">
       <div class="field"><label for="inRows">Rows</label><input id="inRows" type="number" min="5" max="30" value="12"></div>
@@ -230,6 +254,25 @@
   <section class="view" id="view-awards">
     <div class="ach-progress" id="achProgress"></div>
     <div id="achList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
+  </section>
+
+  <!-- REPLAY -->
+  <section class="view" id="view-replay">
+    <div id="replayList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
+    <div id="replayPlayer">
+      <div class="rp-meta"><span>⏱️ <b id="rpTime">0.0s</b></span><span>Move <b id="rpCount">0 / 0</b></span></div>
+      <div class="card">
+        <div class="board-shell"><div class="board replay-board" id="replayBoard"></div></div>
+      </div>
+      <div class="rp-controls">
+        <button id="rpBack" title="Step back">⏮</button>
+        <button id="rpPlay" title="Play / pause">▶</button>
+        <button id="rpFwd" title="Step forward">⏭</button>
+        <input type="range" class="rp-scrub" id="rpScrub" min="0" max="0" value="0" aria-label="Replay timeline">
+        <button class="rp-close" id="rpClose" title="Close replay">✕ Close</button>
+      </div>
+      <div class="hint">Scrub the timeline or step through each move to review your game and spot where it went wrong.</div>
+    </div>
   </section>
 </div>
 
@@ -287,11 +330,13 @@ const $ = id => document.getElementById(id);
 const boardEl=$('board'), mineEl=$('mineCount'), timerEl=$('timer'), resetEl=$('reset'),
   statusEl=$('status'), bestEl=$('best'), diffEl=$('difficulty'), soundBtn=$('soundBtn'),
   customPanel=$('customPanel'), inRows=$('inRows'), inCols=$('inCols'), inMines=$('inMines'),
-  applyCustom=$('applyCustom'), themeBtn=$('themeBtn'), toastEl=$('toast');
+  applyCustom=$('applyCustom'), themeBtn=$('themeBtn'), toastEl=$('toast'),
+  restartBtn=$('restartBtn');
 
 /* ============ State ============ */
 let diff='beginner', rows, cols, mines, grid, started, dead, won,
   flagsPlaced, revealedCount, usedFlag, badFlag, timer=0, timerId=null;
+let replayMoves=[], replayStartT=0, replayMines=null;
 
 function bestKey(){ return diff==='custom' ? `custom_${rows}x${cols}_${mines}` : diff; }
 
@@ -317,6 +362,18 @@ const SFX={
   lose:()=>seq([{f:330,t:'sawtooth'},{f:247,t:'sawtooth'},{f:165,d:0.3,t:'sawtooth'}]),
 };
 
+/* ============ Replay recording ============ */
+function collectMines(){ const l=[]; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(grid[r][c].mine) l.push([r,c]); return l; }
+function recMove(k,r,c){ if(!replayMoves) return; replayMoves.push({k,r,c,t:Math.max(0,Math.round(performance.now()-replayStartT))}); }
+function saveReplay(result){
+  if(!replayMines || !replayMoves || !replayMoves.length) return;
+  const games=LS.get('boomsweep_replays', []);
+  games.unshift({ id:Date.now(), date:Date.now(), diff, rows, cols, mines,
+    mineList:replayMines, moves:replayMoves, result, time:timer });
+  while(games.length>12) games.pop();
+  LS.set('boomsweep_replays', games);
+}
+
 /* ============ Zoom ============ */
 let zoom = 1;
 const ZMIN = 0.5, ZMAX = 2.6;
@@ -331,6 +388,7 @@ function init(){
   const cfg=LEVELS[diff]; rows=cfg.rows; cols=cfg.cols; mines=cfg.mines;
   grid=Array.from({length:rows},()=>Array.from({length:cols},()=>({mine:false,revealed:false,flagged:false,count:0})));
   started=false; dead=false; won=false; flagsPlaced=0; revealedCount=0; usedFlag=false; badFlag=false;
+  replayMoves=[]; replayStartT=performance.now(); replayMines=null;
   stopTimer(); timer=0; timerEl.textContent='0'; resetEl.textContent='🙂';
   statusEl.textContent='Tap any tile to start'; statusEl.className='status';
   updateMineCount(); renderBoard(); renderBest(); applyZoom();
@@ -367,13 +425,15 @@ function paintCell(r,c){
 }
 function onLeft(r,c){
   if(dead||won) return; const cell=grid[r][c]; if(cell.flagged) return;
-  if(!started){ placeMines(r,c); started=true; startTimer(); updateMineCount(); }
+  if(!started){ placeMines(r,c); started=true; startTimer(); updateMineCount(); replayMines=collectMines(); }
+  recMove('r',r,c);
   if(cell.mine){ cell.revealed=true; SFX.lose(); loseGame(r,c); return; }
   reveal(r,c); SFX.reveal(); checkWin();
 }
 function onRight(r,c){
   if(dead||won) return; const cell=grid[r][c]; if(cell.revealed) return;
   cell.flagged=!cell.flagged; flagsPlaced+=cell.flagged?1:-1;
+  recMove(cell.flagged?'f':'u',r,c);
   if(cell.flagged){ usedFlag=true; if(!cell.mine) badFlag=true; SFX.flag(); } else SFX.unflag();
   paintCell(r,c); updateMineCount();
 }
@@ -388,6 +448,7 @@ function loseGame(hitR,hitC){
   }
   stats.played++; stats.lost++; stats.curStreak=0; saveStats();
   checkPlayAchievements();
+  saveReplay('lose');
 }
 function checkWin(){
   if(revealedCount!==rows*cols-mines) return;
@@ -414,6 +475,7 @@ function checkWin(){
   if(stats.curStreak>=10) unlock('streak10');
   checkPlayAchievements();
   renderBest();
+  saveReplay('win');
 }
 function checkPlayAchievements(){
   if(stats.played>=10) unlock('play10');
@@ -457,6 +519,74 @@ function renderAwards(){
       <div class="meta"><div class="name">${a.name}</div><div class="desc">${a.desc}</div></div>
       ${on?'<div class="tick">✓</div>':''}</div>`;
   }).join('');
+}
+
+/* ============ Replay view ============ */
+let rp={ game:null, idx:0, playing:false, timerId:null, grid:null };
+function renderReplayList(){
+  rpPause(); $('replayPlayer').classList.remove('show'); $('replayList').style.display='';
+  const games=LS.get('boomsweep_replays', []);
+  if(!games.length){ $('replayList').innerHTML='<div class="hint">No replays yet. Finish a game and it will be saved here automatically — your last 12 games are kept.</div>'; return; }
+  $('replayList').innerHTML=games.map((g,i)=>{
+    const lvl=g.diff==='custom'?`Custom ${g.rows}×${g.cols}`:LEVELS[g.diff].label;
+    const res=g.result==='win'?'✅ Win':'💥 Loss';
+    const d=new Date(g.date);
+    return `<div class="replay-item"><div class="ri-main"><div class="ri-title">${lvl} — ${res}</div>
+      <div class="ri-sub">${g.time}s • ${g.moves.length} moves • ${d.toLocaleDateString()} ${d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+      <button class="ri-play" data-i="${i}">▶ Watch</button></div>`;
+  }).join('');
+}
+function buildReplayGrid(g){
+  const gr=Array.from({length:g.rows},()=>Array.from({length:g.cols},()=>({mine:false,revealed:false,flagged:false,count:0})));
+  g.mineList.forEach(([r,c])=>{ if(gr[r]&&gr[r][c]) gr[r][c].mine=true; });
+  for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){ if(gr[r][c].mine)continue; let n=0;
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue; const nr=r+dr,nc=c+dc;
+      if(nr>=0&&nr<g.rows&&nc>=0&&nc<g.cols&&gr[nr][nc].mine)n++; } gr[r][c].count=n; }
+  rp.grid=gr;
+  const bd=$('replayBoard'); bd.style.gridTemplateColumns=`repeat(${g.cols}, 1fr)`; bd.innerHTML='';
+  for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){ const b=document.createElement('div'); b.className='cell'; bd.appendChild(b); }
+}
+function replayReveal(gr,g,r,c){
+  const cell=gr[r][c]; if(cell.revealed||cell.flagged) return;
+  cell.revealed=true;
+  if(cell.count===0&&!cell.mine) for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(!dr&&!dc)continue;
+    const nr=r+dr,nc=c+dc; if(nr>=0&&nr<g.rows&&nc>=0&&nc<g.cols&&!gr[nr][nc].revealed) replayReveal(gr,g,nr,nc); }
+}
+function renderReplayAt(idx){
+  const g=rp.game, gr=rp.grid; if(!g||!gr) return;
+  idx=Math.max(0,Math.min(g.moves.length,idx));
+  for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){ gr[r][c].revealed=false; gr[r][c].flagged=false; }
+  let lastHit=null;
+  for(let m=0;m<idx;m++){ const mv=g.moves[m];
+    if(mv.k==='r'){ replayReveal(gr,g,mv.r,mv.c); if(gr[mv.r][mv.c].mine) lastHit=[mv.r,mv.c]; }
+    else if(mv.k==='f'){ if(gr[mv.r][mv.c]) gr[mv.r][mv.c].flagged=true; }
+    else if(mv.k==='u'){ if(gr[mv.r][mv.c]) gr[mv.r][mv.c].flagged=false; }
+  }
+  const bd=$('replayBoard');
+  for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){
+    const cell=gr[r][c], el=bd.children[r*g.cols+c]; if(!el) continue; el.className='cell'; el.textContent='';
+    if(cell.flagged&&!cell.revealed){ el.classList.add('flag'); el.textContent='🚩'; continue; }
+    if(cell.revealed){ el.classList.add('open');
+      if(cell.mine){ el.classList.add(lastHit&&lastHit[0]===r&&lastHit[1]===c?'mine-hit':'mine-show'); el.textContent='💣'; }
+      else if(cell.count>0){ el.textContent=cell.count; el.classList.add('c'+cell.count); } }
+  }
+  rp.idx=idx; $('rpScrub').value=idx; $('rpCount').textContent=`${idx} / ${g.moves.length}`;
+  const t=idx>0 ? g.moves[idx-1].t : 0; $('rpTime').textContent=(t/1000).toFixed(1)+'s';
+}
+function openReplay(i){
+  const games=LS.get('boomsweep_replays', []), g=games[i]; if(!g) return;
+  rp.game=g; rp.idx=0; rp.playing=false;
+  buildReplayGrid(g);
+  $('replayList').style.display='none'; $('replayPlayer').classList.add('show');
+  $('rpScrub').max=g.moves.length; $('rpScrub').value=0; $('rpPlay').textContent='▶';
+  renderReplayAt(0);
+}
+function rpPause(){ rp.playing=false; if($('rpPlay'))$('rpPlay').textContent='▶'; if(rp.timerId){ clearInterval(rp.timerId); rp.timerId=null; } }
+function rpPlay(){
+  if(!rp.game) return;
+  if(rp.idx>=rp.game.moves.length) renderReplayAt(0);
+  rp.playing=true; $('rpPlay').textContent='⏸';
+  rp.timerId=setInterval(()=>{ if(rp.idx>=rp.game.moves.length){ rpPause(); return; } renderReplayAt(rp.idx+1); }, 480);
 }
 
 /* ============ Theme + toast ============ */
@@ -503,6 +633,15 @@ applyCustom.addEventListener('click',()=>{
 });
 soundBtn.addEventListener('click',()=>{ soundOn=!soundOn; LS.set('boomsweep_sound',soundOn);
   soundBtn.textContent=soundOn?'🔊 Sound':'🔇 Muted'; if(soundOn) beep(660,0.07,'sine',0.1); });
+restartBtn.addEventListener('click',init);
+
+/* replay controls */
+$('replayList').addEventListener('click',e=>{ const b=e.target.closest('.ri-play'); if(b) openReplay(+b.dataset.i); });
+$('rpBack').addEventListener('click',()=>{ rpPause(); renderReplayAt(rp.idx-1); });
+$('rpFwd').addEventListener('click',()=>{ rpPause(); renderReplayAt(rp.idx+1); });
+$('rpPlay').addEventListener('click',()=>{ rp.playing?rpPause():rpPlay(); });
+$('rpScrub').addEventListener('input',e=>{ rpPause(); renderReplayAt(+e.target.value); });
+$('rpClose').addEventListener('click',renderReplayList);
 themeBtn.addEventListener('click',()=>{ theme=THEMES[(THEMES.indexOf(theme)+1)%THEMES.length];
   LS.set('boomsweep_theme',theme); applyTheme(); showToast('Theme: '+theme[0].toUpperCase()+theme.slice(1)); });
 
@@ -510,7 +649,10 @@ document.querySelector('.tabs').addEventListener('click',e=>{ const b=e.target.c
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+b.dataset.view).classList.add('active');
-  if(b.dataset.view==='stats') renderStats(); if(b.dataset.view==='awards') renderAwards(); });
+  if(b.dataset.view!=='replay') rpPause();
+  if(b.dataset.view==='stats') renderStats();
+  if(b.dataset.view==='awards') renderAwards();
+  if(b.dataset.view==='replay') renderReplayList(); });
 
 $('resetStats').addEventListener('click',()=>{
   if(!confirm('Reset all stats, best times and achievements? This cannot be undone.')) return;
