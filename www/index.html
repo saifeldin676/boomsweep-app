@@ -221,6 +221,7 @@
       </div>
       <button class="sound-btn" id="restartBtn" title="Restart this game">↻ Restart</button>
       <button class="sound-btn" id="ddBtn" title="Toggle 3D board">🧊 3D</button>
+      <button class="sound-btn" id="ddFitBtn" title="Fit board to screen" style="display:none">⤢ Fit</button>
       <button class="sound-btn" id="soundBtn" title="Toggle sound effects">🔊 Sound</button>
     </div>
     <div class="custom-panel" id="customPanel">
@@ -357,12 +358,23 @@ let replayMoves=[], replayStartT=0, replayMines=null;
 function bestKey(){ return diff==='custom' ? `custom_${rows}x${cols}_${mines}` : diff; }
 
 /* ============ Sound ============ */
-let audioCtx=null;
+let audioCtx=null, _audioUnlocked=false;
+function ddPingNativeAudio(){ try{ if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.audio) window.webkit.messageHandlers.audio.postMessage('unlock'); }catch(e){} }
+function ensureAudio(){
+  try{ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; }
+  if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); ddPingNativeAudio(); }
+  return audioCtx;
+}
+function unlockAudio(){
+  const c=ensureAudio(); if(!c||_audioUnlocked) return;
+  try{ const b=c.createBuffer(1,1,22050), s=c.createBufferSource(); s.buffer=b; s.connect(c.destination); s.start(0); _audioUnlocked=true; }catch(e){}
+  ddPingNativeAudio();
+}
+['pointerdown','touchend','mousedown','keydown'].forEach(function(ev){ window.addEventListener(ev, unlockAudio, {passive:true}); });
 function beep(freq,dur=0.08,type='sine',vol=0.12){
   if(!soundOn) return;
   try{
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    if(audioCtx.state==='suspended') audioCtx.resume();
+    if(!ensureAudio()) return;
     const o=audioCtx.createOscillator(), g=audioCtx.createGain();
     o.type=type; o.frequency.value=freq;
     g.gain.setValueAtTime(vol,audioCtx.currentTime);
@@ -733,8 +745,7 @@ function ddBurst(x,y,z){
   E.push({ t0:performance.now(), dur:760, ease:t=>t, onUpdate:()=>{ const dt=0.016; parts.forEach(pp=>{ pp.vy-=9.2*dt; pp.mesh.position.x+=pp.vx*dt; pp.mesh.position.y+=pp.vy*dt; pp.mesh.position.z+=pp.vz*dt; }); }, onDone:()=>parts.forEach(pp=>B.remove(pp.mesh)), done:false });
 }
 function ddBoom(){ if(!soundOn) return; try{
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended') audioCtx.resume();
+    if(!ensureAudio()) return;
   const t=audioCtx.currentTime, o=audioCtx.createOscillator(), og=audioCtx.createGain();
   o.type='sine'; o.frequency.setValueAtTime(110,t); o.frequency.exponentialRampToValueAtTime(40,t+0.5);
   og.gain.setValueAtTime(0.0001,t); og.gain.exponentialRampToValueAtTime(0.4,t+0.03); og.gain.exponentialRampToValueAtTime(0.0001,t+0.7);
@@ -791,7 +802,7 @@ function ddBuild(){
       row.push({ mesh, cap, num:null, flag:null, bomb:null, mark:null, sig:'' });
     } threeD.tiles.push(row);
   }
-  threeD.cam.radius=Math.max(spanX,spanZ)*1.15+4; threeD.autoRotate=true; threeD.cam.theta=Math.PI*0.5; threeD.cam.phi=0.64; threeD.colorsDirty=false;
+  threeD.cam.radius=ddFitRadius(); threeD.autoRotate=true; threeD.cam.theta=Math.PI*0.5; threeD.cam.phi=0.64; threeD.colorsDirty=false;
 }
 function ddRecolor(){ threeD.colorsDirty=false; if(threeD.platform) threeD.platform.material.color.copy(ddCol('--line'));
   if(threeD.tiles) for(const row of threeD.tiles) for(const t of row) t.sig=''; }
@@ -839,9 +850,9 @@ function ddInput(el){
     if(!pd.moved&&!lp&&pd.tile){ const t2=ddPick(e.clientX,e.clientY); if(t2&&t2.r===pd.tile.r&&t2.c===pd.tile.c) onLeft(pd.tile.r,pd.tile.c); } pd=null; }
   el.addEventListener('pointerup',up); el.addEventListener('pointercancel',()=>{ if(pt)clearTimeout(pt); pd=null; });
   el.addEventListener('contextmenu',e=>{ e.preventDefault(); const t=ddPick(e.clientX,e.clientY); if(t) onRight(t.r,t.c); });
-  el.addEventListener('wheel',e=>{ e.preventDefault(); threeD.cam.radius=Math.max(6,Math.min(40,threeD.cam.radius+Math.sign(e.deltaY)*1.2)); },{passive:false});
+  el.addEventListener('wheel',e=>{ e.preventDefault(); threeD.cam.radius=Math.max(5,Math.min(95,threeD.cam.radius+Math.sign(e.deltaY)*1.2)); },{passive:false});
   let pdst=0; el.addEventListener('touchstart',e=>{ if(e.touches.length===2) pdst=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); },{passive:true});
-  el.addEventListener('touchmove',e=>{ if(e.touches.length===2){ e.preventDefault(); const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); if(pdst) threeD.cam.radius=Math.max(6,Math.min(40,threeD.cam.radius*(pdst/d))); pdst=d; if(pt)clearTimeout(pt); pd=null; } },{passive:false});
+  el.addEventListener('touchmove',e=>{ if(e.touches.length===2){ e.preventDefault(); const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); if(pdst) threeD.cam.radius=Math.max(5,Math.min(95,threeD.cam.radius*(pdst/d))); pdst=d; if(pt)clearTimeout(pt); pd=null; } },{passive:false});
 }
 function ddLoop(now){
   if(!threeD.on){ threeD.raf=null; return; }
@@ -862,7 +873,7 @@ function ddSetOn(on){
   const shell=document.querySelector('.board-shell'), zb=document.querySelector('.zoombar');
   if(on){ if(!window.THREE){ showToast('3D unavailable (no WebGL)'); threeD.on=false; ddBtn.classList.remove('on'); ddBtn.textContent='🧊 3D'; return; }
     try {
-      if(!threeD.ready) init3D(); dd3.style.display='block'; shell.style.display='none'; if(zb) zb.style.display='none';
+      if(!threeD.ready) init3D(); dd3.style.display='block'; shell.style.display='none'; if(zb) zb.style.display='none'; var _fb=document.getElementById('ddFitBtn'); if(_fb) _fb.style.display='';
       ddResize(); if(threeD.R!==rows||threeD.C!==cols||!threeD.tiles) ddBuild();
       if(threeD.tiles) for(const row of threeD.tiles) for(const t of row) t.sig='';
       if(!threeD.raf) threeD.raf=requestAnimationFrame(ddLoop);
@@ -872,8 +883,19 @@ function ddSetOn(on){
       ddBtn.classList.remove('on'); ddBtn.textContent='\uD83E\uDDCA 3D';
       if(dd3) dd3.style.display='none'; shell.style.display=''; if(zb) zb.style.display='';
     }
-  } else { dd3.style.display='none'; shell.style.display=''; if(zb) zb.style.display=''; }
+  } else { dd3.style.display='none'; shell.style.display=''; if(zb) zb.style.display=''; var _fb=document.getElementById('ddFitBtn'); if(_fb) _fb.style.display='none'; }
 }
+function ddFitRadius(){
+  const spanX=cols*(DD_CELL+DD_GAP)-DD_GAP, spanZ=rows*(DD_CELL+DD_GAP)-DD_GAP;
+  const sphere=0.5*Math.hypot(spanX,spanZ,1.2);
+  const fovV=(threeD.camera?threeD.camera.fov:42)*Math.PI/180;
+  const aspect=(threeD.camera&&threeD.camera.aspect)?threeD.camera.aspect:1;
+  const fovH=2*Math.atan(Math.tan(fovV/2)*aspect);
+  const fov=Math.min(fovV,fovH);
+  return Math.max(5,Math.min(95, sphere/Math.sin(fov/2)*1.06));
+}
+function ddFit(){ if(!threeD.ready) return; threeD.cam.radius=ddFitRadius(); threeD.cam.theta=Math.PI*0.5; threeD.cam.phi=0.64; threeD.autoRotate=false; }
+const ddFitBtn=$('ddFitBtn'); if(ddFitBtn) ddFitBtn.addEventListener('click',ddFit);
 ddBtn.addEventListener('click',()=>ddSetOn(!threeD.on));
 // refresh 3D colors when the theme changes
 const _origApplyTheme=applyTheme;
